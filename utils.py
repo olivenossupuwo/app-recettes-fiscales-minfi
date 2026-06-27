@@ -692,7 +692,7 @@ def _make_df_table(doc, df: pd.DataFrame, header_color="#4318FF"):
 
 
 # =============================================================================
-# 7. RAPPORT PDF
+# 7. RAPPORT PDF  — style LaTeX professionnel
 # =============================================================================
 def generate_pdf_report(*, titre, horizon, n_years, kpis, metrics_d, prev_df,
                         by_year, backtest, fkpis, include_kpis, include_hist,
@@ -702,199 +702,267 @@ def generate_pdf_report(*, titre, horizon, n_years, kpis, metrics_d, prev_df,
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
+    from reportlab.lib.units import cm, mm
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle,
-        PageBreak, KeepTogether,
+        PageBreak, KeepTogether, HRFlowable,
     )
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY, TA_RIGHT
 
     buf = io.BytesIO()
 
+    # ── palette ──────────────────────────────────────────────────────────
     NAVY_C    = colors.HexColor(NAVY)
     PURPLE_C  = colors.HexColor(PURPLE)
     BLACK_C   = colors.black
-    GRAY_LINE = colors.HexColor("#CCCCCC")
-    LIGHT_ROW = colors.HexColor("#F7F7F7")
+    GRAY_MID  = colors.HexColor("#888888")
+    RULE_GRAY = colors.HexColor("#AAAAAA")
+    ALT_ROW   = colors.HexColor("#F4F4F4")   # ligne alternée légère
 
     PAGE_W, PAGE_H = A4
-    L_MARGIN = 2.2 * cm
-    R_MARGIN = 2.2 * cm
-    CONTENT_W = PAGE_W - L_MARGIN - R_MARGIN   # ≈ 16.6 cm
+    L_MAR  = 2.5 * cm
+    R_MAR  = 2.5 * cm
+    T_MAR  = 2.0 * cm
+    B_MAR  = 2.0 * cm
+    CW     = PAGE_W - L_MAR - R_MAR        # largeur utile ≈ 16.5 cm
 
-    # ── entête / pied de page ─────────────────────────────────────────────
+    # ── en-tête / pied de page (toutes pages) ────────────────────────────
     def _header_footer(canvas, doc_):
         canvas.saveState()
-        # Bande navy en haut
+        # Bande navy
         canvas.setFillColor(NAVY_C)
-        canvas.rect(0, PAGE_H - 1.15 * cm, PAGE_W, 1.15 * cm, fill=1, stroke=0)
+        canvas.rect(0, PAGE_H - 1.1 * cm, PAGE_W, 1.1 * cm, fill=1, stroke=0)
         canvas.setFillColor(colors.white)
         canvas.setFont("Times-Bold", 9)
-        canvas.drawString(L_MARGIN, PAGE_H - 0.78 * cm, "MINISTÈRE DES FINANCES · CAMEROUN")
+        canvas.drawString(L_MAR, PAGE_H - 0.73 * cm,
+                          "MINISTÈRE DES FINANCES · CAMEROUN")
         canvas.setFont("Times-Roman", 8)
-        canvas.drawRightString(PAGE_W - R_MARGIN, PAGE_H - 0.78 * cm,
+        canvas.drawRightString(PAGE_W - R_MAR, PAGE_H - 0.73 * cm,
                                "Système d'Analyse et de Prévision des Recettes Fiscales")
-        # Filet bas + numéro de page
-        canvas.setStrokeColor(BLACK_C)
-        canvas.setLineWidth(0.5)
-        canvas.line(L_MARGIN, 1.3 * cm, PAGE_W - R_MARGIN, 1.3 * cm)
+        # Filet bas
+        canvas.setStrokeColor(GRAY_MID)
+        canvas.setLineWidth(0.4)
+        canvas.line(L_MAR, 1.35 * cm, PAGE_W - R_MAR, 1.35 * cm)
+        # Numéro de page
         canvas.setFillColor(BLACK_C)
-        canvas.setFont("Times-Italic", 8)
+        canvas.setFont("Times-Italic", 9)
         canvas.drawCentredString(PAGE_W / 2, 0.8 * cm, f"Page {doc_.page}")
         canvas.restoreState()
 
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        leftMargin=L_MARGIN, rightMargin=R_MARGIN,
-        topMargin=1.8 * cm, bottomMargin=1.8 * cm,
+        leftMargin=L_MAR, rightMargin=R_MAR,
+        topMargin=T_MAR, bottomMargin=B_MAR,
     )
 
-    # ── styles typographiques ─────────────────────────────────────────────
-    styles = getSampleStyleSheet()
+    # ══════════════════════════════════════════════════════════════════════
+    # STYLES TYPOGRAPHIQUES  — Times New Roman 12 pt, texte justifié
+    # ══════════════════════════════════════════════════════════════════════
+    BODY_SIZE = 12
+    LEAD      = 18          # interligne LaTeX ≈ 1.5 × corps
 
-    centered_bold = ParagraphStyle(
-        "CB", fontName="Times-Bold", fontSize=12, textColor=NAVY_C,
-        alignment=TA_CENTER, spaceAfter=4, leading=16,
+    cover_repub = ParagraphStyle(
+        "CRep", fontName="Times-Bold", fontSize=13, textColor=NAVY_C,
+        alignment=TA_CENTER, leading=18, spaceAfter=3,
     )
-    centered_italic = ParagraphStyle(
-        "CI", fontName="Times-Italic", fontSize=10, textColor=BLACK_C,
-        alignment=TA_CENTER, spaceAfter=4, leading=14,
+    cover_devise = ParagraphStyle(
+        "CDev", fontName="Times-Italic", fontSize=11, textColor=BLACK_C,
+        alignment=TA_CENTER, leading=15, spaceAfter=10,
     )
-    minfi_blue = ParagraphStyle(
-        "MB", fontName="Times-Bold", fontSize=16, textColor=PURPLE_C,
-        alignment=TA_CENTER, spaceAfter=4, leading=20,
+    cover_minfi = ParagraphStyle(
+        "CMF", fontName="Times-Bold", fontSize=18, textColor=PURPLE_C,
+        alignment=TA_CENTER, leading=24, spaceAfter=3,
     )
-    title_st = ParagraphStyle(
-        "TIT", fontName="Times-Bold", fontSize=22, textColor=BLACK_C,
-        alignment=TA_CENTER, spaceAfter=10, leading=28,
+    cover_eng = ParagraphStyle(
+        "CEng", fontName="Times-Italic", fontSize=11, textColor=BLACK_C,
+        alignment=TA_CENTER, leading=15, spaceAfter=6,
     )
-    sub_st = ParagraphStyle(
-        "SUB", fontName="Times-Italic", fontSize=11, textColor=BLACK_C,
-        alignment=TA_CENTER, spaceAfter=4, leading=16,
+    cover_title = ParagraphStyle(
+        "CTit", fontName="Times-Bold", fontSize=24, textColor=BLACK_C,
+        alignment=TA_CENTER, leading=32, spaceAfter=14,
     )
+    cover_sub = ParagraphStyle(
+        "CSub", fontName="Times-Italic", fontSize=12, textColor=BLACK_C,
+        alignment=TA_CENTER, leading=17, spaceAfter=5,
+    )
+    # Titres de section : gras 14 pt, filet sous-jacent géré séparément
     h1_st = ParagraphStyle(
         "H1", fontName="Times-Bold", fontSize=14, textColor=BLACK_C,
-        spaceBefore=20, spaceAfter=8, leading=18, leftIndent=0,
+        leading=20, spaceBefore=22, spaceAfter=6, leftIndent=0,
     )
+    # Sous-section (méthodologie)
+    h2_st = ParagraphStyle(
+        "H2", fontName="Times-BoldItalic", fontSize=12, textColor=BLACK_C,
+        leading=17, spaceBefore=12, spaceAfter=4, leftIndent=0,
+    )
+    # Corps principal : Times 12 pt, justifié, interligne 18 pt
     body_st = ParagraphStyle(
-        "BD", fontName="Times-Roman", fontSize=11, textColor=BLACK_C,
-        alignment=TA_JUSTIFY, leading=17, spaceBefore=2, spaceAfter=6,
+        "BD", fontName="Times-Roman", fontSize=BODY_SIZE, textColor=BLACK_C,
+        alignment=TA_JUSTIFY, leading=LEAD, spaceBefore=0, spaceAfter=8,
     )
+    # Corps gras (liste de puces)
     bold_body = ParagraphStyle(
-        "BB", fontName="Times-Bold", fontSize=11, textColor=BLACK_C,
-        leading=17, spaceBefore=6, spaceAfter=4,
+        "BB", fontName="Times-Bold", fontSize=BODY_SIZE, textColor=BLACK_C,
+        leading=LEAD, spaceBefore=6, spaceAfter=4,
     )
+    # Légende de figure : italic 10 pt, centré
     caption_st = ParagraphStyle(
-        "CAP", fontName="Times-Italic", fontSize=9, textColor=BLACK_C,
-        alignment=TA_CENTER, spaceBefore=4, spaceAfter=12, leading=13,
+        "CAP", fontName="Times-Italic", fontSize=10, textColor=GRAY_MID,
+        alignment=TA_CENTER, leading=14, spaceBefore=5, spaceAfter=14,
+    )
+    # Note de bas de tableau
+    note_st = ParagraphStyle(
+        "NOTE", fontName="Times-Italic", fontSize=10, textColor=GRAY_MID,
+        leading=14, spaceBefore=4, spaceAfter=10,
     )
 
-    # ── helper : tableau de données générique ─────────────────────────────
-    def _data_table(data, col_widths=None, bold_row=None, font_size=10,
-                    padding=6, align_right_from=1):
-        """
-        data        : list of lists (premier = en-tête)
-        bold_row    : index (1-based) de la ligne à mettre en gras
-        """
-        if col_widths is None:
-            n = len(data[0])
-            col_widths = [CONTENT_W / n] * n
+    # ══════════════════════════════════════════════════════════════════════
+    # HELPERS  TABLEAUX — style booktabs (pas de bordures verticales)
+    # ══════════════════════════════════════════════════════════════════════
+    TOPRULE    = 1.5
+    MIDRULE    = 0.75
+    BOTTOMRULE = 1.5
+    CMIDRULE   = 0.3          # filet léger entre lignes de données
 
-        ts = TableStyle([
-            # Bordures extérieures
-            ("LINEABOVE",  (0, 0),  (-1, 0),  1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0),  (-1, 0),  0.8, BLACK_C),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            # Lignes internes (entre lignes de données)
-            ("LINEBELOW",  (0, 1),  (-1, -2), 0.25, GRAY_LINE),
-            # En-tête
+    def _booktabs_style(n_data_rows, bold_row=None, alt=True,
+                        font_size=11, padding=7, align_right_cols=None):
+        """
+        Renvoie un TableStyle booktabs :
+          - toprule (1.5pt), midrule (0.75pt), bottomrule (1.5pt)
+          - pas de lignes verticales
+          - filet léger entre lignes de données
+          - alternance optionnelle de fond
+        """
+        cmds = [
+            ("LINEABOVE",  (0, 0),  (-1, 0),  TOPRULE,    BLACK_C),
+            ("LINEBELOW",  (0, 0),  (-1, 0),  MIDRULE,    BLACK_C),
+            ("LINEBELOW",  (0, -1), (-1, -1), BOTTOMRULE, BLACK_C),
             ("FONTNAME",   (0, 0),  (-1, 0),  "Times-Bold"),
             ("FONTSIZE",   (0, 0),  (-1, -1), font_size),
             ("TEXTCOLOR",  (0, 0),  (-1, -1), BLACK_C),
-            ("PADDING",    (0, 0),  (-1, -1), padding),
+            ("TOPPADDING",    (0, 0), (-1, -1), padding),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), padding),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
             ("VALIGN",     (0, 0),  (-1, -1), "MIDDLE"),
-        ])
-        if align_right_from is not None:
-            ts.add("ALIGN", (align_right_from, 0), (-1, -1), "RIGHT")
+        ]
+        # Filets entre lignes de données
+        for r in range(1, n_data_rows):
+            cmds.append(("LINEBELOW", (0, r), (-1, r), CMIDRULE, RULE_GRAY))
+        # Alternance fond
+        if alt:
+            for r in range(1, n_data_rows + 1, 2):
+                cmds.append(("BACKGROUND", (0, r), (-1, r), ALT_ROW))
+        # Colonnes numériques alignées à droite
+        if align_right_cols:
+            for c in align_right_cols:
+                cmds.append(("ALIGN", (c, 0), (c, -1), "RIGHT"))
+        # Ligne du meilleur modèle en gras
         if bold_row is not None:
-            ts.add("FONTNAME",  (0, bold_row), (-1, bold_row), "Times-Bold")
+            cmds.append(("FONTNAME", (0, bold_row), (-1, bold_row), "Times-Bold"))
+        return TableStyle(cmds)
 
+    def _make_table(data, col_widths, bold_row=None, alt=True,
+                    font_size=11, padding=7, align_right_cols=None):
+        n_data = len(data) - 1
         t = Table(data, colWidths=col_widths, repeatRows=1)
-        t.setStyle(ts)
+        t.setStyle(_booktabs_style(n_data, bold_row=bold_row, alt=alt,
+                                   font_size=font_size, padding=padding,
+                                   align_right_cols=align_right_cols))
         return t
 
-    # ── helper : tableau KPI (2 colonnes, valeur en gras à droite) ─────────
-    def _kpi_table(rows_data, left_w=9.5 * cm):
-        right_w = CONTENT_W - left_w
-        header  = [["Indicateur", "Valeur"]]
-        data    = header + [[k, v] for k, v in rows_data]
-        ts = TableStyle([
-            ("LINEABOVE",  (0, 0),  (-1, 0),  1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0),  (-1, 0),  0.8, BLACK_C),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            ("LINEBELOW",  (0, 1),  (-1, -2), 0.25, GRAY_LINE),
+    def _kv_table(rows_data, label="Indicateur", value_label="Valeur",
+                  left_frac=0.60):
+        """Tableau clé / valeur (2 colonnes) — valeur en gras à droite."""
+        lw = CW * left_frac
+        rw = CW - lw
+        data = [[label, value_label]] + [[k, v] for k, v in rows_data]
+        n_data = len(data) - 1
+        cmds = [
+            ("LINEABOVE",  (0, 0),  (-1, 0),  TOPRULE,    BLACK_C),
+            ("LINEBELOW",  (0, 0),  (-1, 0),  MIDRULE,    BLACK_C),
+            ("LINEBELOW",  (0, -1), (-1, -1), BOTTOMRULE, BLACK_C),
             ("FONTNAME",   (0, 0),  (-1, 0),  "Times-Bold"),
-            ("FONTNAME",   (1, 1),  (1, -1),  "Times-Bold"),
-            ("FONTSIZE",   (0, 0),  (-1, -1), 10),
+            ("FONTNAME",   (1, 1),  (1,  -1), "Times-Bold"),
+            ("FONTSIZE",   (0, 0),  (-1, -1), 11),
             ("TEXTCOLOR",  (0, 0),  (-1, -1), BLACK_C),
-            ("ALIGN",      (1, 0),  (1, -1),  "RIGHT"),
-            ("PADDING",    (0, 0),  (-1, -1), 7),
+            ("ALIGN",      (1, 0),  (1,  -1), "RIGHT"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
             ("VALIGN",     (0, 0),  (-1, -1), "MIDDLE"),
-        ])
-        t = Table(data, colWidths=[left_w, right_w])
-        t.setStyle(ts)
+        ]
+        for r in range(1, n_data):
+            cmds.append(("LINEBELOW", (0, r), (-1, r), CMIDRULE, RULE_GRAY))
+        for r in range(1, n_data + 1, 2):
+            cmds.append(("BACKGROUND", (0, r), (-1, r), ALT_ROW))
+        t = Table(data, colWidths=[lw, rw])
+        t.setStyle(TableStyle(cmds))
         return t
 
-    # ── helper : image centrée ─────────────────────────────────────────────
-    def _centered_img(src, w, h):
-        img = Image(src, width=w, height=h)
+    def _img_c(src, w=None, h=None):
+        """Image centrée."""
+        img = Image(src, width=w or CW, height=h or 8 * cm)
         img.hAlign = "CENTER"
         return img
+
+    def _section_rule():
+        """Filet fin sous un titre de section (style LaTeX article)."""
+        return HRFlowable(width="100%", thickness=0.5, color=RULE_GRAY,
+                          spaceAfter=6, spaceBefore=0)
 
     story = []
 
     # ══════════════════════════════════════════════════════════════════════
     # PAGE DE GARDE
     # ══════════════════════════════════════════════════════════════════════
-    story.append(Spacer(1, 1.2 * cm))
+    story.append(Spacer(1, 1.0 * cm))
 
+    # République du Cameroun + devise
+    story.append(Paragraph("RÉPUBLIQUE DU CAMEROUN", cover_repub))
+    story.append(Paragraph("<i>Paix · Travail · Patrie</i>", cover_devise))
+
+    # Logo MINFI centré juste au-dessus de "Ministère des Finances"
     if Path(logo_path).exists():
-        logo_img = Image(logo_path, width=4.8 * cm, height=4.8 * cm)
-        logo_img.hAlign = "CENTER"
-        story.append(logo_img)
-        story.append(Spacer(1, 0.5 * cm))
+        logo = Image(logo_path, width=5.0 * cm, height=5.0 * cm)
+        logo.hAlign = "CENTER"
+        story.append(logo)
+        story.append(Spacer(1, 0.4 * cm))
 
-    story.append(Paragraph("RÉPUBLIQUE DU CAMEROUN", centered_bold))
-    story.append(Paragraph("<i>Paix · Travail · Patrie</i>", centered_italic))
-    story.append(Spacer(1, 0.15 * cm))
-    story.append(Paragraph("MINISTÈRE DES FINANCES", minfi_blue))
-    story.append(Paragraph("<i>Ministry of Finance</i>", centered_italic))
+    # Ministère des Finances
+    story.append(Paragraph("MINISTÈRE DES FINANCES", cover_minfi))
+    story.append(Paragraph("<i>Ministry of Finance</i>", cover_eng))
 
-    # Trait décoratif
+    # Filet décoratif double
     story.append(Spacer(1, 0.5 * cm))
-    sep = Table([[""]], colWidths=[CONTENT_W], rowHeights=[2.5])
-    sep.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PURPLE_C)]))
-    story.append(sep)
-    story.append(Spacer(1, 2.2 * cm))
+    story.append(HRFlowable(width="100%", thickness=2.0, color=PURPLE_C,
+                             spaceAfter=2, spaceBefore=0))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=PURPLE_C,
+                             spaceAfter=0, spaceBefore=4))
+    story.append(Spacer(1, 2.0 * cm))
 
-    # Titre principal
-    story.append(Paragraph(titre, title_st))
-    story.append(Spacer(1, 0.3 * cm))
+    # Titre du rapport
+    story.append(Paragraph(titre, cover_title))
 
-    sub_txt = f"Horizon de prévision : {horizon} mois"
+    best_name = "Random Forest" if horizon == 12 else "XGBoost"
+    sub_txt   = f"Horizon de prévision : {horizon} mois"
     if horizon == 12 and n_years > 1:
         sub_txt += f" projeté sur {n_years} ans"
-    best_name = "Random Forest" if horizon == 12 else "XGBoost"
-    sub_txt += f" · Modèle {best_name}"
-    story.append(Paragraph(sub_txt, sub_st))
-    story.append(Paragraph(f"Édité le {datetime.now().strftime('%d / %m / %Y')}", sub_st))
+    sub_txt += f" — Modèle {best_name}"
+    story.append(Paragraph(sub_txt, cover_sub))
+    story.append(Paragraph(
+        f"Édité le {datetime.now().strftime('%d / %m / %Y')}",
+        cover_sub,
+    ))
 
     story.append(PageBreak())
 
     # ══════════════════════════════════════════════════════════════════════
-    # 1. SYNTHÈSE EXÉCUTIVE
+    # 1.  SYNTHÈSE EXÉCUTIVE
     # ══════════════════════════════════════════════════════════════════════
-    story.append(Paragraph("1. Synthèse exécutive", h1_st))
+    story.append(Paragraph("1. Synthèse exécutive", h1_st))
+    story.append(_section_rule())
     story.append(Paragraph(
         "Ce rapport présente les résultats de l'analyse et de la prévision des recettes "
         "fiscales du Cameroun, produits par le Système d'Analyse et de Prévision développé "
@@ -909,208 +977,239 @@ def generate_pdf_report(*, titre, horizon, n_years, kpis, metrics_d, prev_df,
     sec_num = 2
 
     # ══════════════════════════════════════════════════════════════════════
-    # 2. INDICATEURS CLÉS
+    # 2.  INDICATEURS CLÉS
     # ══════════════════════════════════════════════════════════════════════
     if include_kpis and kpis:
-        story.append(Paragraph(f"{sec_num}. Indicateurs clés observés", h1_st))
+        story.append(Paragraph(f"{sec_num}. Indicateurs clés observés", h1_st))
+        story.append(_section_rule())
         sec_num += 1
         kpi_rows = [
-            ("Dernière valeur mensuelle observée", f"{kpis['last_value']:.2f} Mds FCFA"),
+            ("Dernière valeur mensuelle observée", f"{kpis['last_value']:.2f} Mds FCFA"),
             ("Période concernée",                  str(kpis["last_date"])),
-            (f"Total annuel {kpis['last_year']}",  f"{kpis['total_last_year']:,.0f} Mds FCFA"),
-            ("Variation annuelle vs N-1",           f"{kpis['yoy_total']:+.2f} %"),
-            ("Moyenne mensuelle sur 12 mois",       f"{kpis['mean_12m']:.2f} Mds FCFA"),
-            ("Coefficient de variation 12 mois",    f"{kpis['cv_12m']:.1f} %"),
+            (f"Total annuel {kpis['last_year']}",  f"{kpis['total_last_year']:,.0f} Mds FCFA"),
+            ("Variation annuelle vs N‑1",      f"{kpis['yoy_total']:+.2f} %"),
+            ("Moyenne mensuelle sur 12 mois",       f"{kpis['mean_12m']:.2f} Mds FCFA"),
+            ("Coefficient de variation 12 mois",    f"{kpis['cv_12m']:.1f} %"),
         ]
-        story.append(_kpi_table(kpi_rows))
-        story.append(Spacer(1, 10))
+        story.append(_kv_table(kpi_rows))
+        story.append(Spacer(1, 8))
 
     # ══════════════════════════════════════════════════════════════════════
-    # 3. ÉVOLUTION HISTORIQUE
+    # 3.  ÉVOLUTION HISTORIQUE
     # ══════════════════════════════════════════════════════════════════════
     if include_hist and df_hist is not None and "Recettes_fiscales" in df_hist.columns:
-        story.append(Paragraph(f"{sec_num}. Évolution historique", h1_st))
+        story.append(Paragraph(f"{sec_num}. Évolution historique", h1_st))
+        story.append(_section_rule())
         sec_num += 1
         img_bytes = _chart_history(df_hist)
-        story.append(_centered_img(io.BytesIO(img_bytes), CONTENT_W, 8.5 * cm))
+        story.append(_img_c(io.BytesIO(img_bytes), CW, 8.5 * cm))
         story.append(Paragraph(
-            "Figure 1 - Évolution mensuelle des recettes fiscales (2010 à 2024)", caption_st,
+            "Figure 1 — Évolution mensuelle des recettes fiscales "
+            "(2010 à 2024).",
+            caption_st,
         ))
 
     # ══════════════════════════════════════════════════════════════════════
-    # 4. PERFORMANCE DES MODÈLES
+    # 4.  PERFORMANCE DES MODÈLES
     # ══════════════════════════════════════════════════════════════════════
     if include_mtr and metrics_d is not None:
         story.append(Paragraph(
-            f"{sec_num}. Performance comparée des modèles (H = {horizon})", h1_st,
+            f"{sec_num}. Performance comparée des modèles "
+            f"(H = {horizon} mois)", h1_st,
         ))
+        story.append(_section_rule())
         sec_num += 1
 
-        df_m  = metrics_d.round(3)
-        cols  = df_m.columns.tolist()
-        rows  = [cols] + df_m.astype(str).values.tolist()
+        df_m  = metrics_d.copy()
+        # arrondi soigné colonne par colonne
+        for col in df_m.columns:
+            if col != "Modele":
+                try:
+                    df_m[col] = df_m[col].astype(float).round(3)
+                except Exception:
+                    pass
 
-        # Ligne du meilleur modèle en gras
+        cols = df_m.columns.tolist()
+        rows = [cols] + df_m.astype(str).values.tolist()
+
         best_model_name = "XGBoost" if horizon in (3, 6) else "RandomForest"
         try:
-            best_row_idx = df_m[df_m["Modele"] == best_model_name].index[0] + 1
+            best_row_idx = int(df_m[df_m["Modele"] == best_model_name].index[0]) + 1
         except Exception:
             try:
-                best_row_idx = df_m["RMSE"].astype(float).idxmin() + 1
+                best_row_idx = int(df_m["RMSE"].astype(float).idxmin()) + 1
             except Exception:
                 best_row_idx = None
 
-        n_cols     = len(cols)
-        col_w0     = 4.2 * cm
-        col_w_rest = (CONTENT_W - col_w0) / max(n_cols - 1, 1)
-        col_widths = [col_w0] + [col_w_rest] * (n_cols - 1)
+        n_c    = len(cols)
+        cw0    = 4.5 * cm
+        cw_r   = (CW - cw0) / max(n_c - 1, 1)
+        cws    = [cw0] + [cw_r] * (n_c - 1)
+        rc     = list(range(1, n_c))    # colonnes numériques
 
-        story.append(_data_table(
-            rows, col_widths=col_widths, bold_row=best_row_idx,
-            font_size=10, padding=6, align_right_from=1,
-        ))
-        story.append(Spacer(1, 6))
+        story.append(_make_table(rows, cws, bold_row=best_row_idx,
+                                 font_size=11, padding=7, align_right_cols=rc))
         story.append(Paragraph(
-            "<i>Le modèle retenu pour cet horizon domine sur les principales métriques "
-            "de performance.</i>",
-            body_st,
+            "<i>Note : la ligne en gras indique le modèle retenu pour cet horizon "
+            "de prévision sur la base de la convergence des métriques RMSE, MAE, MAPE et R².</i>",
+            note_st,
         ))
 
     # ══════════════════════════════════════════════════════════════════════
-    # 5. PRÉVISIONS
+    # 5.  PRÉVISIONS
     # ══════════════════════════════════════════════════════════════════════
     if include_prev and prev_df is not None and fkpis is not None:
-        story.append(Paragraph(f"{sec_num}. Prévisions sur {horizon} mois", h1_st))
+        story.append(Paragraph(
+            f"{sec_num}. Prévisions sur {horizon} mois", h1_st,
+        ))
+        story.append(_section_rule())
         sec_num += 1
 
-        # Tableau KPI prévision
-        prev_kpi_rows = [
-            ("Total prévu sur la période",   f"{fkpis['total']:,.0f} Mds FCFA"),
-            ("Croissance attendue",          f"{fkpis['growth']:+.2f} % vs même période {fkpis['ref_year']}"),
-            ("Précision attendue du modèle", f"MAPE = {fkpis['mape']:.2f} %"),
+        # Tableau synthèse de prévision
+        prev_rows = [
+            ("Total prévu sur la période",
+             f"{fkpis['total']:,.0f} Mds FCFA"),
+            ("Croissance attendue",
+             f"{fkpis['growth']:+.2f} % vs même période {fkpis['ref_year']}"),
+            ("Précision attendue du modèle (MAPE test)",
+             f"{fkpis['mape']:.2f} %"),
         ]
-        prev_kpi_data = [["Indicateur de prévision", "Valeur"]] + \
-                        [[k, v] for k, v in prev_kpi_rows]
-        tk = Table(prev_kpi_data, colWidths=[9.5 * cm, CONTENT_W - 9.5 * cm])
-        tk.setStyle(TableStyle([
-            ("LINEABOVE",  (0, 0),  (-1, 0),  1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0),  (-1, 0),  0.8, BLACK_C),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            ("LINEBELOW",  (0, 1),  (-1, -2), 0.25, GRAY_LINE),
-            ("FONTNAME",   (0, 0),  (-1, 0),  "Times-Bold"),
-            ("FONTNAME",   (1, 1),  (1, -1),  "Times-Bold"),
-            ("FONTSIZE",   (0, 0),  (-1, -1), 10),
-            ("TEXTCOLOR",  (0, 0),  (-1, -1), BLACK_C),
-            ("ALIGN",      (1, 0),  (1, -1),  "RIGHT"),
-            ("PADDING",    (0, 0),  (-1, -1), 7),
-            ("VALIGN",     (0, 0),  (-1, -1), "MIDDLE"),
-        ]))
-        story.append(tk)
+        story.append(_kv_table(prev_rows,
+                               label="Indicateur de prévision", value_label="Valeur"))
         story.append(Spacer(1, 10))
 
-        # Cumul par année (liste à puces)
+        # Cumul par année
         if by_year is not None and len(by_year) > 1:
             story.append(Paragraph("<b>Cumul prévu par année</b>", bold_body))
             for yr, total in by_year.items():
                 story.append(Paragraph(
-                    f"&nbsp;&nbsp;• Année <b>{yr}</b> : <b>{total:,.0f} Mds FCFA</b>",
+                    f"  •  Année <b>{yr}</b> : "
+                    f"<b>{total:,.0f} Mds FCFA</b>",
                     body_st,
                 ))
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 10))
 
-        # Graphique prévision
+        # Graphique
         img_bytes = _chart_forecast(prev_df, horizon)
-        story.append(_centered_img(io.BytesIO(img_bytes), CONTENT_W, 8.5 * cm))
+        story.append(_img_c(io.BytesIO(img_bytes), CW, 8.5 * cm))
         story.append(Paragraph(
-            "Figure - Prévisions mensuelles avec intervalle de confiance 95 %", caption_st,
+            "Figure 2 — Prévisions mensuelles des recettes fiscales "
+            "avec intervalle de confiance à 95 %.",
+            caption_st,
         ))
 
-        # Tableau détail des prévisions
+        # Tableau détail
         df_p   = prev_df.round(2)
         data_p = [df_p.columns.tolist()] + df_p.astype(str).values.tolist()
         n_c    = len(df_p.columns)
-        cw     = [CONTENT_W / n_c] * n_c
-        story.append(_data_table(data_p, col_widths=cw, font_size=9, padding=5,
-                                 align_right_from=1))
+        cws    = [CW / n_c] * n_c
+        rc     = list(range(1, n_c))
+        story.append(_make_table(data_p, cws, font_size=10, padding=5,
+                                 align_right_cols=rc))
 
     # ══════════════════════════════════════════════════════════════════════
-    # 6. VALIDATION 2024
+    # 6.  VALIDATION 2024
     # ══════════════════════════════════════════════════════════════════════
     if include_val and backtest is not None:
-        story.append(Paragraph(f"{sec_num}. Validation sur l'année 2024", h1_st))
+        story.append(Paragraph(
+            f"{sec_num}. Validation sur l'année 2024", h1_st,
+        ))
+        story.append(_section_rule())
         sec_num += 1
+
         mape_bt = backtest["Écart (%)"].abs().mean()
         story.append(Paragraph(
-            "Confrontation des prévisions aux valeurs réellement observées en 2024. "
-            f"L'erreur moyenne absolue en pourcentage (MAPE) constatée s'élève à "
-            f"<b>{mape_bt:.2f} %</b>.",
+            "La confrontation des prévisions du modèle aux valeurs réellement observées "
+            "sur l'année 2024 permet d'évaluer la qualité opérationnelle des prévisions. "
+            f"L'erreur moyenne absolue en pourcentage (MAPE) constatée sur cette période "
+            f"s'élève à <b>{mape_bt:.2f} %</b>.",
             body_st,
         ))
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 6))
 
         img_bytes = _chart_validation(backtest, horizon)
-        story.append(_centered_img(io.BytesIO(img_bytes), CONTENT_W, 8 * cm))
-        story.append(Paragraph("Figure - Comparaison Réel vs Prévu sur 2024", caption_st))
+        story.append(_img_c(io.BytesIO(img_bytes), CW, 8.0 * cm))
+        story.append(Paragraph(
+            "Figure 3 — Comparaison Réel vs Prévu sur 2024 "
+            f"(horizon H = {horizon} mois).",
+            caption_st,
+        ))
 
         df_b   = backtest.round(2)
         data_b = [df_b.columns.tolist()] + df_b.astype(str).values.tolist()
         n_c    = len(df_b.columns)
-        cw     = [CONTENT_W / n_c] * n_c
-        story.append(_data_table(data_b, col_widths=cw, font_size=9, padding=5,
-                                 align_right_from=1))
+        cws    = [CW / n_c] * n_c
+        rc     = list(range(1, n_c))
+        story.append(_make_table(data_b, cws, font_size=10, padding=5,
+                                 align_right_cols=rc))
 
     # ══════════════════════════════════════════════════════════════════════
-    # 7. SHAP
+    # 7.  SHAP
     # ══════════════════════════════════════════════════════════════════════
     if include_shap:
         story.append(Paragraph(
-            f"{sec_num}. Variables les plus contributives (SHAP)", h1_st,
+            f"{sec_num}. Variables les plus contributives (SHAP)", h1_st,
         ))
+        story.append(_section_rule())
         sec_num += 1
+
         story.append(Paragraph(
-            "L'analyse SHAP (SHapley Additive exPlanations) quantifie la contribution de chaque "
-            "variable explicative à la prévision produite par le modèle XGBoost. Plus la valeur "
-            "SHAP absolue est élevée, plus la variable a une influence forte sur la sortie du modèle.",
+            "L'analyse SHAP (SHapley Additive exPlanations) quantifie la contribution "
+            "marginale de chaque variable explicative à la prévision produite par le modèle "
+            "XGBoost. La valeur SHAP absolue moyenne mesure l'influence globale d'une variable "
+            "sur l'ensemble du jeu de test : plus cette valeur est élevée, plus la "
+            "variable oriente significativement la sortie du modèle.",
             body_st,
         ))
         shap_path = Path(figures_dir) / f"11_SHAP_XGBoost_H{horizon}.png"
         if shap_path.exists():
-            story.append(Spacer(1, 8))
-            story.append(_centered_img(str(shap_path), CONTENT_W, 11 * cm))
+            story.append(Spacer(1, 6))
+            story.append(_img_c(str(shap_path), CW, 11 * cm))
             story.append(Paragraph(
-                f"Figure - Valeurs SHAP pour le modèle XGBoost (H = {horizon})", caption_st,
+                f"Figure 4 — Importance des variables selon les valeurs "
+                f"SHAP — modèle XGBoost (H = {horizon} mois).",
+                caption_st,
             ))
 
     # ══════════════════════════════════════════════════════════════════════
-    # 8. MÉTHODOLOGIE
+    # 8.  MÉTHODOLOGIE
     # ══════════════════════════════════════════════════════════════════════
     if include_meth:
-        story.append(Paragraph(f"{sec_num}. Méthodologie", h1_st))
+        story.append(Paragraph(f"{sec_num}. Méthodologie", h1_st))
+        story.append(_section_rule())
 
-        sections_meth = [
+        meth_sections = [
             ("Données utilisées",
-             "Recettes fiscales mensuelles du Cameroun de janvier 2010 à décembre 2024 "
-             "(180 observations) accompagnées de 14 variables exogènes macroéconomiques "
-             "et climatiques (PIB, IPI, Inflation, Prix Brent, REER, Dépenses publiques, "
-             "Solde budgétaire, prix internationaux des matières premières, "
-             "précipitations, etc.)."),
-            ("Ingénierie des features",
-             "Construction de lags de la série cible, décomposition STL "
-             "(tendance + saisonnalité + résidu), sélection des lags résiduels les plus "
-             "informatifs par corrélation croisée, agrégation trimestrielle pour les "
-             "variables disponibles uniquement à fréquence basse."),
-            ("Modèles évalués",
-             "Six modèles : Ridge, Lasso, ElasticNet (linéaires régularisés), "
-             "Random Forest, XGBoost (ensemble) et SVR (noyau RBF). Validation croisée "
-             "temporelle pour éviter toute fuite d'information future."),
-            ("Critère de sélection",
-             "XGBoost a été retenu pour les horizons H=3 et H=6, et Random Forest pour "
-             "H=12. Chacun domine sur les principales métriques de performance "
-             "(RMSE, MAE, MAPE, R²) pour son horizon respectif."),
+             "Les données mobilisées comprennent les recettes fiscales mensuelles du "
+             "Cameroun de janvier 2010 à décembre 2024, soit 180 observations. "
+             "Elles sont enrichies de 14 variables exogènes macroéconomiques et climatiques : "
+             "PIB, indice de production industrielle, taux d'inflation, prix du baril Brent, "
+             "taux de change effectif réel (REER), dépenses publiques, solde budgétaire, "
+             "indices de prix alimentaires (FAO), prix des engrais, du cacao, du café Robusta, "
+             "du coton, du riz, des températures moyennes et des précipitations."),
+            ("Ingénierie des variables (feature engineering)",
+             "La construction des prédicteurs repose sur les lags de la série cible, "
+             "la décomposition STL (tendance, saisonnalité, résidu), la sélection des "
+             "décalages résiduels les plus informatifs par corrélation croisée partielle "
+             "(PACF), ainsi que l'agrégation trimestrielle des variables disponibles "
+             "uniquement à basse fréquence."),
+            ("Familles de modèles évalués",
+             "Six familles de modèles ont été comparées : modèles linéaires "
+             "régularisés (Ridge, Lasso, ElasticNet) et méthodes ensemblistes ou à "
+             "noyau (Random Forest, XGBoost, SVR à noyau RBF). La validation adopte "
+             "un schéma de validation croisée temporelle à fenêtre expansive, évitant "
+             "tout risque de fuite d'information future."),
+            ("Critère de sélection du modèle optimal",
+             "Le modèle retenu est celui qui présente la meilleure convergence sur "
+             "quatre métriques évaluées sur l'année test 2024 : RMSE (erreur "
+             "quadratique moyenne), MAE (erreur absolue moyenne), MAPE (erreur "
+             "relative) et R² (coefficient de détermination). XGBoost est retenu "
+             "pour les horizons H=3 et H=6, et Random Forest pour H=12."),
         ]
-        for titre_s, texte_s in sections_meth:
-            story.append(Paragraph(f"<b>{titre_s}</b>", bold_body))
-            story.append(Paragraph(texte_s, body_st))
+
+        for sous_titre, texte in meth_sections:
+            story.append(Paragraph(sous_titre, h2_st))
+            story.append(Paragraph(texte, body_st))
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return buf.getvalue()
