@@ -711,330 +711,406 @@ def generate_pdf_report(*, titre, horizon, n_years, kpis, metrics_d, prev_df,
 
     buf = io.BytesIO()
 
-    NAVY_C   = colors.HexColor(NAVY)
-    PURPLE_C = colors.HexColor(PURPLE)
-    BLACK_C  = colors.black
-    LIGHT_C  = colors.HexColor("#F4F7FE")
+    NAVY_C    = colors.HexColor(NAVY)
+    PURPLE_C  = colors.HexColor(PURPLE)
+    BLACK_C   = colors.black
+    GRAY_LINE = colors.HexColor("#CCCCCC")
+    LIGHT_ROW = colors.HexColor("#F7F7F7")
 
-    # === Fonction pour entête sur chaque page ============================
+    PAGE_W, PAGE_H = A4
+    L_MARGIN = 2.2 * cm
+    R_MARGIN = 2.2 * cm
+    CONTENT_W = PAGE_W - L_MARGIN - R_MARGIN   # ≈ 16.6 cm
+
+    # ── entête / pied de page ─────────────────────────────────────────────
     def _header_footer(canvas, doc_):
         canvas.saveState()
-        page_w = A4[0]
-        # Bande en-tête navy
+        # Bande navy en haut
         canvas.setFillColor(NAVY_C)
-        canvas.rect(0, A4[1] - 1.2 * cm, page_w, 1.2 * cm, fill=1, stroke=0)
+        canvas.rect(0, PAGE_H - 1.15 * cm, PAGE_W, 1.15 * cm, fill=1, stroke=0)
         canvas.setFillColor(colors.white)
         canvas.setFont("Times-Bold", 9)
-        canvas.drawString(2 * cm, A4[1] - 0.8 * cm, "MINISTÈRE DES FINANCES · CAMEROUN")
+        canvas.drawString(L_MARGIN, PAGE_H - 0.78 * cm, "MINISTÈRE DES FINANCES · CAMEROUN")
         canvas.setFont("Times-Roman", 8)
-        canvas.drawRightString(page_w - 2 * cm, A4[1] - 0.8 * cm,
+        canvas.drawRightString(PAGE_W - R_MARGIN, PAGE_H - 0.78 * cm,
                                "Système d'Analyse et de Prévision des Recettes Fiscales")
-        # Pied de page
+        # Filet bas + numéro de page
+        canvas.setStrokeColor(BLACK_C)
+        canvas.setLineWidth(0.5)
+        canvas.line(L_MARGIN, 1.3 * cm, PAGE_W - R_MARGIN, 1.3 * cm)
         canvas.setFillColor(BLACK_C)
         canvas.setFont("Times-Italic", 8)
-        canvas.drawCentredString(page_w / 2, 1 * cm,
-                                  f"Page {doc_.page}")
-        # Filet fin en bas
-        canvas.setStrokeColor(BLACK_C); canvas.setLineWidth(0.5)
-        canvas.line(2 * cm, 1.3 * cm, page_w - 2 * cm, 1.3 * cm)
+        canvas.drawCentredString(PAGE_W / 2, 0.8 * cm, f"Page {doc_.page}")
         canvas.restoreState()
 
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=2.5 * cm, rightMargin=2.5 * cm,
-                            topMargin=2.2 * cm, bottomMargin=2 * cm)
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=L_MARGIN, rightMargin=R_MARGIN,
+        topMargin=1.8 * cm, bottomMargin=1.8 * cm,
+    )
 
+    # ── styles typographiques ─────────────────────────────────────────────
     styles = getSampleStyleSheet()
+
+    centered_bold = ParagraphStyle(
+        "CB", fontName="Times-Bold", fontSize=12, textColor=NAVY_C,
+        alignment=TA_CENTER, spaceAfter=4, leading=16,
+    )
+    centered_italic = ParagraphStyle(
+        "CI", fontName="Times-Italic", fontSize=10, textColor=BLACK_C,
+        alignment=TA_CENTER, spaceAfter=4, leading=14,
+    )
+    minfi_blue = ParagraphStyle(
+        "MB", fontName="Times-Bold", fontSize=16, textColor=PURPLE_C,
+        alignment=TA_CENTER, spaceAfter=4, leading=20,
+    )
     title_st = ParagraphStyle(
-        "T", parent=styles["Title"],
-        fontSize=22, textColor=BLACK_C, spaceAfter=8,
-        alignment=TA_CENTER, fontName="Times-Bold",
+        "TIT", fontName="Times-Bold", fontSize=22, textColor=BLACK_C,
+        alignment=TA_CENTER, spaceAfter=10, leading=28,
     )
     sub_st = ParagraphStyle(
-        "Sub", parent=styles["Normal"],
-        fontSize=11, textColor=BLACK_C, alignment=TA_CENTER,
-        spaceAfter=4, fontName="Times-Italic",
+        "SUB", fontName="Times-Italic", fontSize=11, textColor=BLACK_C,
+        alignment=TA_CENTER, spaceAfter=4, leading=16,
     )
     h1_st = ParagraphStyle(
-        "H1", parent=styles["Heading1"],
-        fontSize=14, textColor=BLACK_C, spaceBefore=22, spaceAfter=10,
-        fontName="Times-Bold", borderPadding=0,
-        borderWidth=0, borderColor=BLACK_C,
+        "H1", fontName="Times-Bold", fontSize=14, textColor=BLACK_C,
+        spaceBefore=20, spaceAfter=8, leading=18, leftIndent=0,
     )
-    h1_st.leftIndent = 0
     body_st = ParagraphStyle(
-        "Body", parent=styles["Normal"],
-        fontSize=11, leading=16, textColor=BLACK_C,
-        alignment=TA_JUSTIFY, fontName="Times-Roman",
-        spaceBefore=2, spaceAfter=6,
+        "BD", fontName="Times-Roman", fontSize=11, textColor=BLACK_C,
+        alignment=TA_JUSTIFY, leading=17, spaceBefore=2, spaceAfter=6,
+    )
+    bold_body = ParagraphStyle(
+        "BB", fontName="Times-Bold", fontSize=11, textColor=BLACK_C,
+        leading=17, spaceBefore=6, spaceAfter=4,
     )
     caption_st = ParagraphStyle(
-        "Cap", parent=styles["Normal"],
-        fontSize=9, textColor=BLACK_C, alignment=TA_CENTER,
-        fontName="Times-Italic", spaceAfter=12, spaceBefore=4,
+        "CAP", fontName="Times-Italic", fontSize=9, textColor=BLACK_C,
+        alignment=TA_CENTER, spaceBefore=4, spaceAfter=12, leading=13,
     )
+
+    # ── helper : tableau de données générique ─────────────────────────────
+    def _data_table(data, col_widths=None, bold_row=None, font_size=10,
+                    padding=6, align_right_from=1):
+        """
+        data        : list of lists (premier = en-tête)
+        bold_row    : index (1-based) de la ligne à mettre en gras
+        """
+        if col_widths is None:
+            n = len(data[0])
+            col_widths = [CONTENT_W / n] * n
+
+        ts = TableStyle([
+            # Bordures extérieures
+            ("LINEABOVE",  (0, 0),  (-1, 0),  1.5, BLACK_C),
+            ("LINEBELOW",  (0, 0),  (-1, 0),  0.8, BLACK_C),
+            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
+            # Lignes internes (entre lignes de données)
+            ("LINEBELOW",  (0, 1),  (-1, -2), 0.25, GRAY_LINE),
+            # En-tête
+            ("FONTNAME",   (0, 0),  (-1, 0),  "Times-Bold"),
+            ("FONTSIZE",   (0, 0),  (-1, -1), font_size),
+            ("TEXTCOLOR",  (0, 0),  (-1, -1), BLACK_C),
+            ("PADDING",    (0, 0),  (-1, -1), padding),
+            ("VALIGN",     (0, 0),  (-1, -1), "MIDDLE"),
+        ])
+        if align_right_from is not None:
+            ts.add("ALIGN", (align_right_from, 0), (-1, -1), "RIGHT")
+        if bold_row is not None:
+            ts.add("FONTNAME",  (0, bold_row), (-1, bold_row), "Times-Bold")
+
+        t = Table(data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(ts)
+        return t
+
+    # ── helper : tableau KPI (2 colonnes, valeur en gras à droite) ─────────
+    def _kpi_table(rows_data, left_w=9.5 * cm):
+        right_w = CONTENT_W - left_w
+        header  = [["Indicateur", "Valeur"]]
+        data    = header + [[k, v] for k, v in rows_data]
+        ts = TableStyle([
+            ("LINEABOVE",  (0, 0),  (-1, 0),  1.5, BLACK_C),
+            ("LINEBELOW",  (0, 0),  (-1, 0),  0.8, BLACK_C),
+            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
+            ("LINEBELOW",  (0, 1),  (-1, -2), 0.25, GRAY_LINE),
+            ("FONTNAME",   (0, 0),  (-1, 0),  "Times-Bold"),
+            ("FONTNAME",   (1, 1),  (1, -1),  "Times-Bold"),
+            ("FONTSIZE",   (0, 0),  (-1, -1), 10),
+            ("TEXTCOLOR",  (0, 0),  (-1, -1), BLACK_C),
+            ("ALIGN",      (1, 0),  (1, -1),  "RIGHT"),
+            ("PADDING",    (0, 0),  (-1, -1), 7),
+            ("VALIGN",     (0, 0),  (-1, -1), "MIDDLE"),
+        ])
+        t = Table(data, colWidths=[left_w, right_w])
+        t.setStyle(ts)
+        return t
+
+    # ── helper : image centrée ─────────────────────────────────────────────
+    def _centered_img(src, w, h):
+        img = Image(src, width=w, height=h)
+        img.hAlign = "CENTER"
+        return img
 
     story = []
 
-    # === PAGE DE GARDE ====================================================
-    if Path(logo_path).exists():
-        # Logo centré en haut
-        story.append(Spacer(1, 1.0 * cm))
-        story.append(Image(logo_path, width=4.5 * cm, height=4.5 * cm))
-        story.append(Spacer(1, 0.4 * cm))
+    # ══════════════════════════════════════════════════════════════════════
+    # PAGE DE GARDE
+    # ══════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 1.2 * cm))
 
-    story.append(Paragraph("RÉPUBLIQUE DU CAMEROUN", ParagraphStyle(
-        "rc", parent=sub_st, fontSize=12, fontName="Times-Bold", textColor=NAVY_C,
-    )))
-    story.append(Paragraph("<i>Paix · Travail · Patrie</i>", sub_st))
-    story.append(Spacer(1, 0.2 * cm))
-    story.append(Paragraph("MINISTÈRE DES FINANCES", ParagraphStyle(
-        "mf", parent=title_st, fontSize=16, textColor=PURPLE_C,
-    )))
-    story.append(Paragraph("<i>Ministry of Finance</i>", sub_st))
+    if Path(logo_path).exists():
+        logo_img = Image(logo_path, width=4.8 * cm, height=4.8 * cm)
+        logo_img.hAlign = "CENTER"
+        story.append(logo_img)
+        story.append(Spacer(1, 0.5 * cm))
+
+    story.append(Paragraph("RÉPUBLIQUE DU CAMEROUN", centered_bold))
+    story.append(Paragraph("<i>Paix · Travail · Patrie</i>", centered_italic))
+    story.append(Spacer(1, 0.15 * cm))
+    story.append(Paragraph("MINISTÈRE DES FINANCES", minfi_blue))
+    story.append(Paragraph("<i>Ministry of Finance</i>", centered_italic))
 
     # Trait décoratif
-    story.append(Spacer(1, 0.4 * cm))
-    tbl_sep = Table([[""]], colWidths=[14 * cm], rowHeights=[2])
-    tbl_sep.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), PURPLE_C)]))
-    story.append(tbl_sep)
-    story.append(Spacer(1, 1.2 * cm))
+    story.append(Spacer(1, 0.5 * cm))
+    sep = Table([[""]], colWidths=[CONTENT_W], rowHeights=[2.5])
+    sep.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PURPLE_C)]))
+    story.append(sep)
+    story.append(Spacer(1, 2.2 * cm))
 
     # Titre principal
     story.append(Paragraph(titre, title_st))
+    story.append(Spacer(1, 0.3 * cm))
 
     sub_txt = f"Horizon de prévision : {horizon} mois"
     if horizon == 12 and n_years > 1:
         sub_txt += f" projeté sur {n_years} ans"
     best_name = "Random Forest" if horizon == 12 else "XGBoost"
-    sub_txt += f"  ·  Modèle {best_name}"
+    sub_txt += f" · Modèle {best_name}"
     story.append(Paragraph(sub_txt, sub_st))
     story.append(Paragraph(f"Édité le {datetime.now().strftime('%d / %m / %Y')}", sub_st))
 
     story.append(PageBreak())
 
-    # === 1. SYNTHÈSE ======================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 1. SYNTHÈSE EXÉCUTIVE
+    # ══════════════════════════════════════════════════════════════════════
     story.append(Paragraph("1. Synthèse exécutive", h1_st))
     story.append(Paragraph(
-        "Ce rapport présente les résultats de l'analyse et de la prévision des recettes fiscales "
-        "du Cameroun, produits par le Système d'Analyse et de Prévision développé sur la base de "
-        "techniques avancées de Machine Learning. Six familles de modèles (Ridge, Lasso, ElasticNet, "
-        "Random Forest, XGBoost et SVR) ont été évaluées. XGBoost a été retenu pour les horizons "
-        "trimestriel et semestriel, et Random Forest pour l'horizon annuel, chacun dominant sur les "
-        "principales métriques de performance (RMSE, MAE, MAPE, R²) pour son horizon respectif.",
+        "Ce rapport présente les résultats de l'analyse et de la prévision des recettes "
+        "fiscales du Cameroun, produits par le Système d'Analyse et de Prévision développé "
+        "sur la base de techniques avancées de Machine Learning. Six familles de modèles "
+        "(Ridge, Lasso, ElasticNet, Random Forest, XGBoost et SVR) ont été évaluées. "
+        "XGBoost a été retenu pour les horizons trimestriel et semestriel, et Random Forest "
+        "pour l'horizon annuel, chacun dominant sur les principales métriques de performance "
+        "(RMSE, MAE, MAPE, R²) pour son horizon respectif.",
         body_st,
     ))
 
     sec_num = 2
 
-    # === KPIs ============================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 2. INDICATEURS CLÉS
+    # ══════════════════════════════════════════════════════════════════════
     if include_kpis and kpis:
         story.append(Paragraph(f"{sec_num}. Indicateurs clés observés", h1_st))
         sec_num += 1
-        data = [
-            ["Indicateur", "Valeur"],
-            ["Dernière valeur mensuelle observée", f"{kpis['last_value']:.2f} Mds FCFA"],
-            ["Période concernée", f"{kpis['last_date']}"],
-            [f"Total annuel {kpis['last_year']}", f"{kpis['total_last_year']:,.0f} Mds FCFA"],
-            ["Variation annuelle vs N-1", f"{kpis['yoy_total']:+.2f} %"],
-            ["Moyenne mensuelle sur 12 mois", f"{kpis['mean_12m']:.2f} Mds FCFA"],
-            ["Coefficient de variation 12 mois", f"{kpis['cv_12m']:.1f} %"],
+        kpi_rows = [
+            ("Dernière valeur mensuelle observée", f"{kpis['last_value']:.2f} Mds FCFA"),
+            ("Période concernée",                  str(kpis["last_date"])),
+            (f"Total annuel {kpis['last_year']}",  f"{kpis['total_last_year']:,.0f} Mds FCFA"),
+            ("Variation annuelle vs N-1",           f"{kpis['yoy_total']:+.2f} %"),
+            ("Moyenne mensuelle sur 12 mois",       f"{kpis['mean_12m']:.2f} Mds FCFA"),
+            ("Coefficient de variation 12 mois",    f"{kpis['cv_12m']:.1f} %"),
         ]
-        t = Table(data, colWidths=[8.5 * cm, 8 * cm])
-        t.setStyle(TableStyle([
-            ("LINEABOVE",  (0, 0), (-1, 0), 1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0), (-1, 0), 0.75, BLACK_C),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            ("FONTNAME",   (0, 0), (-1, 0), "Times-Bold"),
-            ("FONTSIZE",   (0, 0), (-1, -1), 10),
-            ("TEXTCOLOR",  (0, 0), (-1, -1), BLACK_C),
-            ("PADDING",    (0, 0), (-1, -1), 7),
-            ("ALIGN",      (1, 0), (-1, -1), "RIGHT"),
-            ("FONTNAME",   (1, 1), (1, -1), "Times-Bold"),
-            ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        story.append(t)
-        story.append(Spacer(1, 12))
+        story.append(_kpi_table(kpi_rows))
+        story.append(Spacer(1, 10))
 
-    # === Historique =======================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 3. ÉVOLUTION HISTORIQUE
+    # ══════════════════════════════════════════════════════════════════════
     if include_hist and df_hist is not None and "Recettes_fiscales" in df_hist.columns:
         story.append(Paragraph(f"{sec_num}. Évolution historique", h1_st))
         sec_num += 1
-        img = _chart_history(df_hist)
-        story.append(Image(io.BytesIO(img), width=16 * cm, height=8 * cm))
-        story.append(Paragraph("Figure 1 - Évolution mensuelle des recettes fiscales (2010 à 2024)", caption_st))
+        img_bytes = _chart_history(df_hist)
+        story.append(_centered_img(io.BytesIO(img_bytes), CONTENT_W, 8.5 * cm))
+        story.append(Paragraph(
+            "Figure 1 - Évolution mensuelle des recettes fiscales (2010 à 2024)", caption_st,
+        ))
 
-    # === Métriques ========================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 4. PERFORMANCE DES MODÈLES
+    # ══════════════════════════════════════════════════════════════════════
     if include_mtr and metrics_d is not None:
-        story.append(Paragraph(f"{sec_num}. Performance comparée des modèles (H = {horizon})", h1_st))
+        story.append(Paragraph(
+            f"{sec_num}. Performance comparée des modèles (H = {horizon})", h1_st,
+        ))
         sec_num += 1
-        df_m = metrics_d.round(3)
-        data = [df_m.columns.tolist()] + df_m.astype(str).values.tolist()
 
-        # Trouver l'index de XGBoost pour le highlight
+        df_m  = metrics_d.round(3)
+        cols  = df_m.columns.tolist()
+        rows  = [cols] + df_m.astype(str).values.tolist()
+
+        # Ligne du meilleur modèle en gras
+        best_model_name = "XGBoost" if horizon in (3, 6) else "RandomForest"
         try:
-            best_row = df_m[df_m["Modele"] == "XGBoost"].index[0] + 1
+            best_row_idx = df_m[df_m["Modele"] == best_model_name].index[0] + 1
         except Exception:
-            best_row = None
+            try:
+                best_row_idx = df_m["RMSE"].astype(float).idxmin() + 1
+            except Exception:
+                best_row_idx = None
 
-        ts = TableStyle([
-            ("LINEABOVE",  (0, 0), (-1, 0), 1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0), (-1, 0), 0.75, BLACK_C),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            ("FONTNAME",   (0, 0), (-1, 0), "Times-Bold"),
-            ("FONTSIZE",   (0, 0), (-1, -1), 10),
-            ("TEXTCOLOR",  (0, 0), (-1, -1), BLACK_C),
-            ("PADDING",    (0, 0), (-1, -1), 6),
-            ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
-        ])
-        if best_row is not None:
-            ts.add("FONTNAME",   (0, best_row), (-1, best_row), "Times-Bold")
-            ts.add("BACKGROUND", (0, best_row), (-1, best_row), colors.HexColor("#F0F0F0"))
+        n_cols     = len(cols)
+        col_w0     = 4.2 * cm
+        col_w_rest = (CONTENT_W - col_w0) / max(n_cols - 1, 1)
+        col_widths = [col_w0] + [col_w_rest] * (n_cols - 1)
 
-        t = Table(data, repeatRows=1); t.setStyle(ts)
-        story.append(t)
+        story.append(_data_table(
+            rows, col_widths=col_widths, bold_row=best_row_idx,
+            font_size=10, padding=6, align_right_from=1,
+        ))
         story.append(Spacer(1, 6))
         story.append(Paragraph(
-            "<i>Le modèle retenu pour cet horizon domine sur les principales métriques de performance.</i>",
+            "<i>Le modèle retenu pour cet horizon domine sur les principales métriques "
+            "de performance.</i>",
             body_st,
         ))
 
-    # === Prévisions =======================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 5. PRÉVISIONS
+    # ══════════════════════════════════════════════════════════════════════
     if include_prev and prev_df is not None and fkpis is not None:
         story.append(Paragraph(f"{sec_num}. Prévisions sur {horizon} mois", h1_st))
         sec_num += 1
 
-        # KPIs prévision
-        data_k = [
-            ["Indicateur de prévision", "Valeur"],
-            ["Total prévu sur la période", f"{fkpis['total']:,.0f} Mds FCFA"],
-            ["Croissance attendue", f"{fkpis['growth']:+.2f} % vs même période {fkpis['ref_year']}"],
-            ["Précision attendue du modèle", f"MAPE = {fkpis['mape']:.2f} %"],
+        # Tableau KPI prévision
+        prev_kpi_rows = [
+            ("Total prévu sur la période",   f"{fkpis['total']:,.0f} Mds FCFA"),
+            ("Croissance attendue",          f"{fkpis['growth']:+.2f} % vs même période {fkpis['ref_year']}"),
+            ("Précision attendue du modèle", f"MAPE = {fkpis['mape']:.2f} %"),
         ]
-        tk = Table(data_k, colWidths=[8.5 * cm, 8 * cm])
+        prev_kpi_data = [["Indicateur de prévision", "Valeur"]] + \
+                        [[k, v] for k, v in prev_kpi_rows]
+        tk = Table(prev_kpi_data, colWidths=[9.5 * cm, CONTENT_W - 9.5 * cm])
         tk.setStyle(TableStyle([
-            ("LINEABOVE",  (0, 0), (-1, 0), 1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0), (-1, 0), 0.75, BLACK_C),
+            ("LINEABOVE",  (0, 0),  (-1, 0),  1.5, BLACK_C),
+            ("LINEBELOW",  (0, 0),  (-1, 0),  0.8, BLACK_C),
             ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            ("FONTNAME",   (0, 0), (-1, 0), "Times-Bold"),
-            ("FONTSIZE",   (0, 0), (-1, -1), 10),
-            ("TEXTCOLOR",  (0, 0), (-1, -1), BLACK_C),
-            ("PADDING",    (0, 0), (-1, -1), 7),
-            ("ALIGN",      (1, 0), (-1, -1), "RIGHT"),
-            ("FONTNAME",   (1, 1), (1, -1), "Times-Bold"),
-            ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEBELOW",  (0, 1),  (-1, -2), 0.25, GRAY_LINE),
+            ("FONTNAME",   (0, 0),  (-1, 0),  "Times-Bold"),
+            ("FONTNAME",   (1, 1),  (1, -1),  "Times-Bold"),
+            ("FONTSIZE",   (0, 0),  (-1, -1), 10),
+            ("TEXTCOLOR",  (0, 0),  (-1, -1), BLACK_C),
+            ("ALIGN",      (1, 0),  (1, -1),  "RIGHT"),
+            ("PADDING",    (0, 0),  (-1, -1), 7),
+            ("VALIGN",     (0, 0),  (-1, -1), "MIDDLE"),
         ]))
         story.append(tk)
         story.append(Spacer(1, 10))
 
+        # Cumul par année (liste à puces)
         if by_year is not None and len(by_year) > 1:
-            story.append(Paragraph("<b>Cumul prévu par année</b>", body_st))
+            story.append(Paragraph("<b>Cumul prévu par année</b>", bold_body))
             for yr, total in by_year.items():
-                story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;• Année <b>{yr}</b> : <b>{total:,.0f} Mds FCFA</b>", body_st))
+                story.append(Paragraph(
+                    f"&nbsp;&nbsp;• Année <b>{yr}</b> : <b>{total:,.0f} Mds FCFA</b>",
+                    body_st,
+                ))
             story.append(Spacer(1, 8))
 
-        img = _chart_forecast(prev_df, horizon)
-        story.append(Image(io.BytesIO(img), width=16 * cm, height=8 * cm))
-        story.append(Paragraph(f"Figure - Prévisions mensuelles avec intervalle de confiance 95 %", caption_st))
+        # Graphique prévision
+        img_bytes = _chart_forecast(prev_df, horizon)
+        story.append(_centered_img(io.BytesIO(img_bytes), CONTENT_W, 8.5 * cm))
+        story.append(Paragraph(
+            "Figure - Prévisions mensuelles avec intervalle de confiance 95 %", caption_st,
+        ))
 
-        # Tableau prévisions
-        df_p = prev_df.round(2)
+        # Tableau détail des prévisions
+        df_p   = prev_df.round(2)
         data_p = [df_p.columns.tolist()] + df_p.astype(str).values.tolist()
-        tp = Table(data_p, repeatRows=1)
-        tp.setStyle(TableStyle([
-            ("LINEABOVE",  (0, 0), (-1, 0), 1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0), (-1, 0), 0.75, BLACK_C),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            ("FONTNAME",   (0, 0), (-1, 0), "Times-Bold"),
-            ("FONTSIZE",   (0, 0), (-1, -1), 9),
-            ("TEXTCOLOR",  (0, 0), (-1, -1), BLACK_C),
-            ("PADDING",    (0, 0), (-1, -1), 5),
-            ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        story.append(tp)
+        n_c    = len(df_p.columns)
+        cw     = [CONTENT_W / n_c] * n_c
+        story.append(_data_table(data_p, col_widths=cw, font_size=9, padding=5,
+                                 align_right_from=1))
 
-    # === Validation 2024 ==================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 6. VALIDATION 2024
+    # ══════════════════════════════════════════════════════════════════════
     if include_val and backtest is not None:
         story.append(Paragraph(f"{sec_num}. Validation sur l'année 2024", h1_st))
         sec_num += 1
         mape_bt = backtest["Écart (%)"].abs().mean()
         story.append(Paragraph(
-            f"Confrontation des prévisions aux valeurs réellement observées en 2024. "
-            f"L'erreur moyenne absolue en pourcentage (MAPE) constatée s'élève à <b>{mape_bt:.2f} %</b>.",
+            "Confrontation des prévisions aux valeurs réellement observées en 2024. "
+            f"L'erreur moyenne absolue en pourcentage (MAPE) constatée s'élève à "
+            f"<b>{mape_bt:.2f} %</b>.",
             body_st,
         ))
         story.append(Spacer(1, 8))
-        img = _chart_validation(backtest, horizon)
-        story.append(Image(io.BytesIO(img), width=16 * cm, height=7.5 * cm))
+
+        img_bytes = _chart_validation(backtest, horizon)
+        story.append(_centered_img(io.BytesIO(img_bytes), CONTENT_W, 8 * cm))
         story.append(Paragraph("Figure - Comparaison Réel vs Prévu sur 2024", caption_st))
 
-        df_b = backtest.round(2)
+        df_b   = backtest.round(2)
         data_b = [df_b.columns.tolist()] + df_b.astype(str).values.tolist()
-        tb = Table(data_b, repeatRows=1)
-        tb.setStyle(TableStyle([
-            ("LINEABOVE",  (0, 0), (-1, 0), 1.5, BLACK_C),
-            ("LINEBELOW",  (0, 0), (-1, 0), 0.75, BLACK_C),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.5, BLACK_C),
-            ("FONTNAME",   (0, 0), (-1, 0), "Times-Bold"),
-            ("FONTSIZE",   (0, 0), (-1, -1), 9),
-            ("TEXTCOLOR",  (0, 0), (-1, -1), BLACK_C),
-            ("PADDING",    (0, 0), (-1, -1), 5),
-            ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        story.append(tb)
+        n_c    = len(df_b.columns)
+        cw     = [CONTENT_W / n_c] * n_c
+        story.append(_data_table(data_b, col_widths=cw, font_size=9, padding=5,
+                                 align_right_from=1))
 
-    # === SHAP ============================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 7. SHAP
+    # ══════════════════════════════════════════════════════════════════════
     if include_shap:
-        story.append(Paragraph(f"{sec_num}. Variables les plus contributives (SHAP)", h1_st))
+        story.append(Paragraph(
+            f"{sec_num}. Variables les plus contributives (SHAP)", h1_st,
+        ))
         sec_num += 1
         story.append(Paragraph(
             "L'analyse SHAP (SHapley Additive exPlanations) quantifie la contribution de chaque "
-            "variable explicative à la prévision produite par le modèle XGBoost. Plus la valeur SHAP "
-            "absolue est élevée, plus la variable a une influence forte sur la sortie du modèle.",
+            "variable explicative à la prévision produite par le modèle XGBoost. Plus la valeur "
+            "SHAP absolue est élevée, plus la variable a une influence forte sur la sortie du modèle.",
             body_st,
         ))
         shap_path = Path(figures_dir) / f"11_SHAP_XGBoost_H{horizon}.png"
         if shap_path.exists():
             story.append(Spacer(1, 8))
-            story.append(Image(str(shap_path), width=15 * cm, height=10 * cm, kind="proportional"))
-            story.append(Paragraph(f"Figure - Valeurs SHAP pour le modèle XGBoost (H = {horizon})", caption_st))
+            story.append(_centered_img(str(shap_path), CONTENT_W, 11 * cm))
+            story.append(Paragraph(
+                f"Figure - Valeurs SHAP pour le modèle XGBoost (H = {horizon})", caption_st,
+            ))
 
-    # === Méthodologie ====================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # 8. MÉTHODOLOGIE
+    # ══════════════════════════════════════════════════════════════════════
     if include_meth:
         story.append(Paragraph(f"{sec_num}. Méthodologie", h1_st))
-        sec_num += 1
 
-        story.append(Paragraph("<b>Données utilisées</b>", body_st))
-        story.append(Paragraph(
-            "Recettes fiscales mensuelles du Cameroun de janvier 2010 à décembre 2024 "
-            "(180 observations) accompagnées de 14 variables exogènes macroéconomiques et "
-            "climatiques (PIB, IPI, Inflation, Prix Brent, REER, Dépenses publiques, Solde "
-            "budgétaire, prix internationaux des matières premières, précipitations, etc.).",
-            body_st,
-        ))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph("<b>Ingénierie des features</b>", body_st))
-        story.append(Paragraph(
-            "Construction de lags de la série cible, décomposition STL "
-            "(tendance + saisonnalité + résidu), sélection des lags résiduels les plus informatifs "
-            "par corrélation croisée, agrégation trimestrielle pour les variables disponibles "
-            "uniquement à fréquence basse.",
-            body_st,
-        ))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph("<b>Modèles évalués</b>", body_st))
-        story.append(Paragraph(
-            "Six modèles : Ridge, Lasso, ElasticNet (linéaires régularisés), Random Forest, "
-            "XGBoost (ensemble) et SVR (noyau RBF). Validation croisée temporelle pour éviter "
-            "toute fuite d'information future.",
-            body_st,
-        ))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph("<b>Critère de sélection</b>", body_st))
-        story.append(Paragraph(
-            "XGBoost a été retenu pour les horizons H=3 et H=6, et Random Forest pour H=12. Chacun "
-            "domine sur les principales métriques de performance (RMSE, MAE, MAPE, R²) pour son horizon respectif.",
-            body_st,
-        ))
+        sections_meth = [
+            ("Données utilisées",
+             "Recettes fiscales mensuelles du Cameroun de janvier 2010 à décembre 2024 "
+             "(180 observations) accompagnées de 14 variables exogènes macroéconomiques "
+             "et climatiques (PIB, IPI, Inflation, Prix Brent, REER, Dépenses publiques, "
+             "Solde budgétaire, prix internationaux des matières premières, "
+             "précipitations, etc.)."),
+            ("Ingénierie des features",
+             "Construction de lags de la série cible, décomposition STL "
+             "(tendance + saisonnalité + résidu), sélection des lags résiduels les plus "
+             "informatifs par corrélation croisée, agrégation trimestrielle pour les "
+             "variables disponibles uniquement à fréquence basse."),
+            ("Modèles évalués",
+             "Six modèles : Ridge, Lasso, ElasticNet (linéaires régularisés), "
+             "Random Forest, XGBoost (ensemble) et SVR (noyau RBF). Validation croisée "
+             "temporelle pour éviter toute fuite d'information future."),
+            ("Critère de sélection",
+             "XGBoost a été retenu pour les horizons H=3 et H=6, et Random Forest pour "
+             "H=12. Chacun domine sur les principales métriques de performance "
+             "(RMSE, MAE, MAPE, R²) pour son horizon respectif."),
+        ]
+        for titre_s, texte_s in sections_meth:
+            story.append(Paragraph(f"<b>{titre_s}</b>", bold_body))
+            story.append(Paragraph(texte_s, body_st))
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return buf.getvalue()
